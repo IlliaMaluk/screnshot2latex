@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, os, warnings, re, json
 from io import BytesIO
 
-# приглушаем шумные варнинги
+                            
 os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
 warnings.filterwarnings("ignore", message="A new version of Albumentations is available", module="albumentations")
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings", module="pydantic")
@@ -25,11 +25,11 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from PIL import Image, ImageFilter, ImageOps
 from pix2tex.cli import LatexOCR
 
-# --- настройки ---
+                   
 PREVIEW_DPI = 140
 SNIP_HIDE_DELAY_MS = 200
 
-# torch (опционально для ускорения)
+                                   
 try:
     import torch
     HAS_TORCH = True
@@ -63,7 +63,7 @@ def build_tex_document(latex_body: str) -> str:
     )
 
 
-# ---------- быстрый PNG-рендер через matplotlib ----------
+                                                           
 def _render_mathtext(latex_str: str, dpi: int) -> QImage:
     body = sanitize_latex(latex_str)
     use_wrap = not LATEX_ENV_RE.search(body)
@@ -95,10 +95,10 @@ def render_latex_to_qimage_fast(latex_str: str, dpi: int = PREVIEW_DPI) -> QImag
         return QImage()
 
 
-# ---------- KaTeX превью (ручной рендер, без auto-render) ----------
+                                                                     
 def make_katex_html(latex_str: str) -> str:
     body = sanitize_latex(latex_str)
-    tex_json = json.dumps(body)  # безопасно для JS
+    tex_json = json.dumps(body)                    
 
     return f"""<!doctype html>
 <html>
@@ -133,7 +133,7 @@ def make_katex_html(latex_str: str) -> str:
 </html>"""
 
 
-# === постобработка распознанного LaTeX: штрихи (без агрессивного c(1)) ===
+                                                                           
 UNICODE_PRIMES = [
     ("\u2032", r"^{\prime}"),
     ("\u2033", r"^{\prime\prime}"),
@@ -179,19 +179,53 @@ def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime:
     return out
 
 
-# --- опциональная анти-подмена греческих символов ---
-_greek_r = re.compile(r'(?<![\\a-zA-Z])\\gamma(?![a-zA-Z])')   # одиночная \gamma
-_theta_6 = re.compile(r'\\Theta(?=\s*[\(\[])')                 # \Theta перед скобкой -> 6
+                                                      
+_greek_r = re.compile(r'(?<![\\a-zA-Z])\\gamma(?![a-zA-Z])')
+_theta_6 = re.compile(r'\\Theta(?=\s*(?:[\(\[]|\\bigl|\\left))')
+_arrow_to_equal = re.compile(r'\\longrightarrow')
+_prime_then_super = re.compile(r'(\^\{\s*\\prime\s*\})(?:\s*\{\}\s*)?(\^\{[^}]+\})')
+_eta_sup_paren = re.compile(r'\^\{\s*\\eta\s*(\([^{}]*\))\s*\}')
+_eta_sub_paren = re.compile(r'_\{\s*\\eta\s*(\([^{}]*\))\s*\}')
+_eta_inline_paren = re.compile(r'\\eta(\s*\(\s*\d+\s*\))')
+_cal_macro = re.compile(r'\\cal\s*\{')
+_cal_i_token = re.compile(r'\\(?:math)?cal\s*\{I\}')
+_cal_z_token = re.compile(r'\\(?:math)?cal\s*\{Z\}')
+_brace_wrap_r = re.compile(r'\{(r(?:_\{[^{}]*\}|_[^{}\s]+)?(?:\^\{[^}]+\})?)\}')
+_double_hyphen = re.compile(r'\s*--\s*')
+_backslashed_double_hyphen = re.compile(r'\\\s*--\s*')
+_backslashed_plus = re.compile(r'\\\s*\+')
+_backslashed_minus = re.compile(r'\\\s*-')
+_bigl_paren = re.compile(r'\\bigl\(')
+_bigr_paren = re.compile(r'\\bigr\)')
+
+
+def _replace_cal_token(match: re.Match) -> str:
+    return 'r'
 
 
 def fix_greek_confusions(s: str) -> str:
     out = s
     out = _greek_r.sub('r', out)
     out = _theta_6.sub('6', out)
+    out = _arrow_to_equal.sub('=', out)
+    out = _prime_then_super.sub(lambda m: m.group(2), out)
+    out = _eta_sup_paren.sub(lambda m: f"^{{n{m.group(1)}}}", out)
+    out = _eta_sub_paren.sub(lambda m: f"_{{n{m.group(1)}}}", out)
+    out = _eta_inline_paren.sub(lambda m: f"n{m.group(1)}", out)
+    out = _cal_macro.sub(r'\\mathcal{', out)
+    out = _cal_i_token.sub(_replace_cal_token, out)
+    out = _cal_z_token.sub(_replace_cal_token, out)
+    out = _brace_wrap_r.sub(lambda m: m.group(1), out)
+    out = _backslashed_double_hyphen.sub('-', out)
+    out = _double_hyphen.sub('-', out)
+    out = _backslashed_plus.sub('+', out)
+    out = _backslashed_minus.sub('-', out)
+    out = _bigl_paren.sub('(', out)
+    out = _bigr_paren.sub(')', out)
     return out
 
 
-# --- Оверлей выделения области ---
+                                   
 class SnipOverlay(QWidget):
     captured = Signal(QImage)
     canceled = Signal()
@@ -208,7 +242,7 @@ class SnipOverlay(QWidget):
         self.dragging = False
         self.rubber = QRubberBand(QRubberBand.Rectangle, self)
 
-        # фон — слепок всех экранов
+                                   
         self.backing = QPixmap(self.virtual_geo.size())
         self.backing.fill(Qt.transparent)
         p = QPainter(self.backing)
@@ -285,14 +319,14 @@ class SnipOverlay(QWidget):
         self.captured.emit(cropped.toImage())
 
 
-# --- Главное окно ---
+                      
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Screen & LaTeX Helper")
         self.setMinimumSize(1220, 720)
 
-        # левая панель: скриншот + OCR
+                                      
         self.preview = QLabel("Скрин-предпросмотр")
         self.preview.setAlignment(Qt.AlignCenter)
         self.preview.setFrameShape(QFrame.StyledPanel)
@@ -309,15 +343,15 @@ class MainWindow(QMainWindow):
         btn_region.setShortcut(QKeySequence("Ctrl+Shift+S"))
         btn_ocr_pix.setShortcut(QKeySequence("Ctrl+Shift+R"))
 
-        self.cb_high_acc = QCheckBox("Высокая точность (медленнее)")  # опциональный флажок
+        self.cb_high_acc = QCheckBox("Высокая точность (медленнее)")                       
         self.cb_fix_primes = QCheckBox("Исправлять штрихи (')")
         self.cb_fix_primes.setChecked(True)
         self.cb_keep_caret_n = QCheckBox("Не трогать ^n (степени)")
         self.cb_keep_caret_n.setChecked(False)
-        self.cb_anti_confuse = QCheckBox("Анти-подмена символов (γ→r, Θ→6)")
+        self.cb_anti_confuse = QCheckBox("Анти-подмена символов (γ→r, Θ→6, η→n, →=)")
         self.cb_anti_confuse.setChecked(False)
 
-        # Режим предобработки + просмотр входа OCR
+                                                  
         self.pre_combo = QComboBox()
         self.pre_combo.addItems([
             "Стандартная",
@@ -325,7 +359,7 @@ class MainWindow(QMainWindow):
             "Без предобработки",
             "Адаптивная бинаризация"
         ])
-        self.pre_combo.setCurrentIndex(1)  # по умолчанию мягкая Hi-Acc
+        self.pre_combo.setCurrentIndex(1)                              
 
         btn_show_ocr_in = QPushButton("Показать вход OCR")
         btn_show_ocr_in.clicked.connect(self._show_ocr_input)
@@ -346,7 +380,7 @@ class MainWindow(QMainWindow):
         left.addWidget(btn_ocr_pix)
         left_wrap = QWidget(); left_wrap.setLayout(left)
 
-        # правая панель: SymPy → LaTeX, превью, .tex
+                                                    
         self.expr_input = QPlainTextEdit()
         self.expr_input.setPlaceholderText(
             "SymPy-выражение: sin(x)^2 + cos(x)^2,\nIntegral(x^2, (x,0,1)), Matrix([[1,x],[y,2]])…"
@@ -359,7 +393,7 @@ class MainWindow(QMainWindow):
         self.latex_output = QPlainTextEdit(); self.latex_output.setReadOnly(True)
         self.tex_output = QPlainTextEdit(); self.tex_output.setReadOnly(True)
 
-        # стек превью: PNG (matplotlib) / KaTeX (web)
+                                                     
         self.preview_stack = QStackedWidget()
         self.latex_preview_img = QLabel("Превью LaTeX")
         self.latex_preview_img.setAlignment(Qt.AlignCenter)
@@ -393,14 +427,14 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 3); splitter.setStretchFactor(1, 2)
         self.setCentralWidget(splitter)
 
-        # меню
+              
         file_menu = self.menuBar().addMenu("&Файл")
         act_save = QAction("Сохранить скрин как PNG…", self); act_save.triggered.connect(self.save_image)
         file_menu.addAction(act_save); file_menu.addSeparator()
         act_quit = QAction("Выход", self); act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
 
-        # состояние
+                   
         self._last_image: QImage | None = None
         self._ocr_model: LatexOCR | None = None
         self._last_latex: str | None = None
@@ -414,7 +448,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
 
-    # --- скрин области с автоскрытием окна ---
+                                               
     def capture_region(self):
         self.hide()
         def start_overlay():
@@ -430,7 +464,7 @@ class MainWindow(QMainWindow):
     def _on_snip_canceled(self):
         self.show(); self.activateWindow(); self.raise_(); self._overlay = None
 
-    # --- утилиты ---
+                     
     def set_image(self, img: QImage):
         self._last_image = img
         pm = QPixmap.fromImage(img)
@@ -456,7 +490,7 @@ class MainWindow(QMainWindow):
         self._last_image.save(path, "PNG")
         QMessageBox.information(self, "Сохранено", f"Сохранено: {path}")
 
-    # --- текст → LaTeX/TeX ---
+                               
     def convert_to_latex(self):
         expr_text = self.expr_input.toPlainText().strip()
         symbols_text = self.var_hint.text().strip()
@@ -482,7 +516,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", str(e))
 
-    # --- картинка → LaTeX (pix2tex) ---
+                                        
     def _qimage_to_pil(self, qimg: QImage) -> Image.Image:
         buf = QBuffer(); buf.open(QBuffer.ReadWrite)
         qimg.save(buf, "PNG")
@@ -493,13 +527,13 @@ class MainWindow(QMainWindow):
         """4 режима: стандарт, мягкая Hi-Acc, без предобработки, адаптивная бинаризация."""
         mode = self.pre_combo.currentText()
 
-        # 0) ориентация
+                       
         img = ImageOps.exif_transpose(img)
 
         if mode == "Без предобработки":
             return img.convert("RGB")
 
-        # масштаб
+                 
         max_side = 2600 if mode == "Мягкая Hi-Acc" else (2400 if mode == "Адаптивная бинаризация" else 2200)
         w, h = img.size
         scale = min(max_side / max(w, h), 2.5)
@@ -508,7 +542,7 @@ class MainWindow(QMainWindow):
 
         if mode == "Мягкая Hi-Acc":
             gray = img.convert("L")
-            # без автоконтраста и blur — щадим штрихи
+                                                     
             sharp = gray.filter(ImageFilter.UnsharpMask(radius=1.3, percent=85, threshold=3))
             return Image.merge("RGB", (sharp, sharp, sharp))
 
@@ -519,7 +553,7 @@ class MainWindow(QMainWindow):
             sharp = gray.filter(ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=3))
             return Image.merge("RGB", (sharp, sharp, sharp))
 
-        # Адаптивная бинаризация (простая локальная схема)
+                                                          
         gray = img.convert("L")
         gray = ImageOps.autocontrast(gray, cutoff=1)
         blur = gray.filter(ImageFilter.GaussianBlur(radius=1.2))
@@ -570,7 +604,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка pix2tex", str(e))
 
-    # --- предпросмотр входа OCR ---
+                                    
     def _show_ocr_input(self):
         if self._last_image is None:
             QMessageBox.information(self, "Нет изображения", "Сначала сделайте скриншот области.")
@@ -592,7 +626,7 @@ class MainWindow(QMainWindow):
         dlg.resize(940, 680)
         dlg.exec()
 
-    # --- вывод LaTeX / TeX / превью ---
+                                        
     def _show_latex_and_tex(self, latex_str: str):
         self._last_latex = latex_str
         self.latex_output.setPlainText(latex_str)
@@ -607,7 +641,7 @@ class MainWindow(QMainWindow):
             return
 
         html = make_katex_html(latex_str)
-        # baseUrl нужен, чтобы CDN стабильнее подтягивался внутри QWebEngine
+                                                                            
         self.latex_preview_web.setHtml(html, QUrl("https://cdn.jsdelivr.net/"))
         self.preview_stack.setCurrentIndex(1)
 
