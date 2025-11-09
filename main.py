@@ -180,6 +180,7 @@ def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime:
 
 
                                                       
+
 _greek_r = re.compile(r'(?<![\\a-zA-Z])\\gamma(?![a-zA-Z])')
 _theta_6 = re.compile(r'\\Theta(?=\s*(?:[\(\[]|\\bigl|\\left))')
 _arrow_to_equal = re.compile(r'\\longrightarrow')
@@ -201,6 +202,7 @@ _bigr_paren = re.compile(r'\\bigr\)')
 
 def _replace_cal_token(match: re.Match) -> str:
     return 'r'
+
 
 
 def fix_greek_confusions(s: str) -> str:
