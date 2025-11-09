@@ -38,6 +38,10 @@ except Exception:
 
 # --- Latex helpers ---
 LATEX_ENV_RE = re.compile(r'\\begin\{.*?\}|\\\[[\s\S]*?\\\]|\\\(.+?\\\)', re.DOTALL)
+MATH_TEXT_CMD_MAP = [
+    (re.compile(r"\\arg(?![A-Za-z])"), r"\\operatorname{arg}"),
+    (re.compile(r"\\Arg(?![A-Za-z])"), r"\\operatorname{Arg}"),
+]
 
 def sanitize_latex(lx: str) -> str:
     s = lx.strip()
@@ -66,6 +70,8 @@ def build_tex_document(latex_body: str) -> str:
 
 def _render_mathtext(latex_str: str, dpi: int) -> QImage:
     body = sanitize_latex(latex_str)
+    for rx, repl in MATH_TEXT_CMD_MAP:
+        body = rx.sub(repl, body)
     use_wrap = not LATEX_ENV_RE.search(body)
     text_expr = f"${body}$" if use_wrap else body
     fig = plt.figure(figsize=(0.01, 0.01), dpi=dpi)
@@ -130,6 +136,8 @@ UNICODE_PRIMES = [
     ("\u2057", r"^{\prime\prime\prime\prime}") # ⁗
 ]
 PRIME_AFTER_TOKEN = re.compile(r"(?P<base>[A-Za-z0-9\\\}\)])('{1,4})")
+# последовательности штрихов внутри скобок степеней/индексов
+PRIME_APOSTROPHE_RUN = re.compile(r"(?<!\\)(?<![A-Za-z])'{1,4}(?![A-Za-z])")
 # паттерны, которые нужно «склеивать» в двойной штрих
 PRIME_GLUE_PATTERNS = [
     re.compile(r"(\^\{\s*\\prime\s*\})\s*'"),
@@ -138,6 +146,57 @@ PRIME_GLUE_PATTERNS = [
     re.compile(r"\^\{\s*\\prime\s*\}\s*\\prime"),
 ]
 FAKE_ONE_AS_PRIME = re.compile(r"(?P<base>[A-Za-z0-9\\\}\)])\s*\^\{\s*[1l]\s*\}(\s*(?=[\(\[]))?")
+SUPERSCRIPT_CHAIN = re.compile(r"\^\{\s*([^{}]*?)\s*\}\s*\{\s*\}\s*\^\{\s*([^{}]*?)\s*\}")
+
+def _replace_apostrophe_runs(segment: str) -> str:
+    return PRIME_APOSTROPHE_RUN.sub(lambda m: r"\\prime" * len(m.group(0)), segment)
+
+def _normalize_braced_primes(text: str) -> str:
+    def _walk(s: str) -> str:
+        res: list[str] = []
+        i = 0
+        while i < len(s):
+            ch = s[i]
+            if ch in "^_":
+                res.append(ch)
+                i += 1
+                if i < len(s) and s[i] == '{':
+                    depth = 1
+                    j = i + 1
+                    while j < len(s) and depth:
+                        if s[j] == '{':
+                            depth += 1
+                        elif s[j] == '}':
+                            depth -= 1
+                        j += 1
+                    inner = s[i + 1:j - 1] if j - 1 > i else ''
+                    processed_inner = _walk(inner)
+                    processed_inner = _replace_apostrophe_runs(processed_inner)
+                    res.append('{'); res.append(processed_inner); res.append('}')
+                    i = j
+                    continue
+            res.append(ch)
+            i += 1
+        combined = ''.join(res)
+        return _replace_apostrophe_runs(combined)
+    return _walk(text)
+
+def collapse_superscript_chain(text: str) -> str:
+    def _repl(m: re.Match) -> str:
+        left = m.group(1).strip()
+        right = m.group(2).strip()
+        if not left:
+            return f"^{{{right}}}"
+        if not right:
+            return f"^{{{left}}}"
+        return f"^{{{left}{right}}}"
+
+    prev = None
+    out = text
+    while prev != out:
+        prev = out
+        out = SUPERSCRIPT_CHAIN.sub(_repl, out)
+    return out
 
 def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime: bool = True) -> str:
     out = s
@@ -148,7 +207,7 @@ def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime:
     def _rep(m: re.Match) -> str:
         base = m.group("base")
         primes = len(m.group(0)) - len(base)
-        return f"{base}^{{" + r"\prime" * primes + "}}"
+        return base + '^{' + r"\\prime" * primes + '}'
     out = PRIME_AFTER_TOKEN.sub(_rep, out)
     # 3) склейка разбитых двойных штрихов (через lambda, чтобы не было bad escape)
     for rx in PRIME_GLUE_PATTERNS:
@@ -161,6 +220,8 @@ def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime:
     # 5) ^{1} / ^{l} как штрих перед скобкой: f^{1}(x) → f^{\prime}(x)
     if allow_one_as_prime:
         out = FAKE_ONE_AS_PRIME.sub(lambda m: f"{m.group('base')}^{{\\prime}}", out)
+    # 6) вложенные фигурные скобки в степенях/индексах
+    out = _normalize_braced_primes(out)
     return out
 
 # --- Оверлей выделения области ---
@@ -522,6 +583,8 @@ class MainWindow(QMainWindow):
             if self.cb_fix_primes.isChecked():
                 allow_caret = not self.cb_keep_caret_n.isChecked()
                 latex = fix_primes_heuristic(latex, allow_caret_n=allow_caret, allow_one_as_prime=True)
+
+            latex = collapse_superscript_chain(latex)
 
             if not latex:
                 QMessageBox.information(self, "Пусто", "pix2tex не распознал формулу на скрине.")
