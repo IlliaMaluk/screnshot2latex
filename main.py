@@ -145,6 +145,14 @@ PRIME_GLUE_PATTERNS = [
     re.compile(r"\^\{\s*\\prime\s*\}\s*\{\s*\\prime\s*\}"),
     re.compile(r"\^\{\s*\\prime\s*\}\s*\\prime"),
 ]
+# шаблон для выделения скобок вида ^{m(1)} → ^{\prime\prime}(1)
+PAREN_BLOCK = r"(?:\\left\s*)?\([^{}]*?(?:\\right\s*)?\)"
+DOUBLE_PRIME_PREFIX_BRACED = re.compile(
+    rf"\^\{{\s*(?P<token>m|rn)\s*(?P<rest>{PAREN_BLOCK})\s*\}}"
+)
+DOUBLE_PRIME_PREFIX = re.compile(
+    rf"\^\s*(?P<token>m|rn)\s*(?P<rest>{PAREN_BLOCK})"
+)
 FAKE_ONE_AS_PRIME = re.compile(r"(?P<base>[A-Za-z0-9\\\}\)])\s*\^\{\s*[1l]\s*\}(\s*(?=[\(\[]))?")
 SUPERSCRIPT_CHAIN = re.compile(r"\^\{\s*([^{}]*?)\s*\}\s*\{\s*\}\s*\^\{\s*([^{}]*?)\s*\}")
 
@@ -198,6 +206,95 @@ def collapse_superscript_chain(text: str) -> str:
         out = SUPERSCRIPT_CHAIN.sub(_repl, out)
     return out
 
+def _apply_double_prime_prefixes(text: str) -> str:
+    def _rest_or_empty(rest: str, following: str) -> str:
+        if not rest:
+            return ''
+        after = following.lstrip()
+        if after.startswith(rest):
+            return ''
+        return rest
+
+    def _repl_braced(m: re.Match) -> str:
+        rest = m.group('rest') or ''
+        tail = text[m.end():]
+        keep = _rest_or_empty(rest, tail)
+        return f"^{{\\prime\\prime}}{keep}"
+
+    text = DOUBLE_PRIME_PREFIX_BRACED.sub(_repl_braced, text)
+
+    def _repl_plain(m: re.Match) -> str:
+        rest = m.group('rest') or ''
+        tail = text[m.end():]
+        keep = _rest_or_empty(rest, tail)
+        return f"^{{\\prime\\prime}}{keep}"
+
+    text = DOUBLE_PRIME_PREFIX.sub(_repl_plain, text)
+    return text
+
+def _replace_caret_shortcuts(text: str) -> str:
+    def _prime_for_sequence(seq: str) -> str | None:
+        core = seq.replace(' ', '')
+        if not core:
+            return None
+        if all(ch in 'nN' for ch in core):
+            count = len(core)
+            if count <= 4:
+                return '{' + r"\\prime" * count + '}'
+        return None
+
+    res: list[str] = []
+    i = 0
+    ln = len(text)
+    while i < ln:
+        ch = text[i]
+        if ch != '^':
+            res.append(ch)
+            i += 1
+            continue
+
+        j = i + 1
+        # пропускаем пробелы после ^
+        while j < ln and text[j].isspace():
+            j += 1
+
+        if j < ln and text[j] == '{':
+            depth = 1
+            k = j + 1
+            while k < ln and depth:
+                if text[k] == '{':
+                    depth += 1
+                elif text[k] == '}':
+                    depth -= 1
+                k += 1
+            if depth != 0:
+                res.append(ch)
+                i += 1
+                continue
+            inner = text[j + 1:k - 1]
+            repl = _prime_for_sequence(inner)
+            if repl:
+                res.append('^' + repl)
+            else:
+                res.append(text[i:k])
+            i = k
+            continue
+
+        k = j
+        while k < ln and text[k] in ('n', 'N', ' '):
+            k += 1
+        seq = text[j:k]
+        repl = _prime_for_sequence(seq)
+        if repl and not (k < ln and text[k] in '([\'_"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'):  # avoid touching real exponents
+            res.append('^' + repl)
+            i = k
+            continue
+
+        res.append('^')
+        i += 1
+
+    return ''.join(res)
+
 def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime: bool = True) -> str:
     out = s
     # 1) юникодные штрихи → \prime
@@ -214,9 +311,9 @@ def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime:
         out = rx.sub(lambda _m: r"^{\prime\prime}", out)
     # 4) ^n → ^{\prime} (если разрешено)
     if allow_caret_n:
-        out = re.sub(r"\^\{?\s*n\s*\}?",   lambda _m: r"^{\prime}",             out)
-        out = re.sub(r"\^\{?\s*nn\s*\}?",  lambda _m: r"^{\prime\prime}",       out)
-        out = re.sub(r"\^\{?\s*nnn\s*\}?", lambda _m: r"^{\prime\prime\prime}", out)
+        out = _replace_caret_shortcuts(out)
+    # 4b) двойные штрихи, распознанные как m/rn перед (⋅)
+    out = _apply_double_prime_prefixes(out)
     # 5) ^{1} / ^{l} как штрих перед скобкой: f^{1}(x) → f^{\prime}(x)
     if allow_one_as_prime:
         out = FAKE_ONE_AS_PRIME.sub(lambda m: f"{m.group('base')}^{{\\prime}}", out)
