@@ -180,14 +180,50 @@ def fix_primes_heuristic(s: str, allow_caret_n: bool = True, allow_one_as_prime:
 
 
                                                       
-_greek_r = re.compile(r'(?<![\\a-zA-Z])\\gamma(?![a-zA-Z])')                     
-_theta_6 = re.compile(r'\\Theta(?=\s*[\(\[])')                                            
+
+_greek_r = re.compile(r'(?<![\\a-zA-Z])\\gamma(?![a-zA-Z])')
+_theta_6 = re.compile(r'\\Theta(?=\s*(?:[\(\[]|\\bigl|\\left))')
+_arrow_to_equal = re.compile(r'\\longrightarrow')
+_prime_then_super = re.compile(r'(\^\{\s*\\prime\s*\})(?:\s*\{\}\s*)?(\^\{[^}]+\})')
+_eta_sup_paren = re.compile(r'\^\{\s*\\eta\s*(\([^{}]*\))\s*\}')
+_eta_sub_paren = re.compile(r'_\{\s*\\eta\s*(\([^{}]*\))\s*\}')
+_eta_inline_paren = re.compile(r'\\eta(\s*\(\s*\d+\s*\))')
+_cal_macro = re.compile(r'\\cal\s*\{')
+_cal_i_token = re.compile(r'\\(?:math)?cal\s*\{I\}')
+_cal_z_token = re.compile(r'\\(?:math)?cal\s*\{Z\}')
+_brace_wrap_r = re.compile(r'\{(r(?:_\{[^{}]*\}|_[^{}\s]+)?(?:\^\{[^}]+\})?)\}')
+_double_hyphen = re.compile(r'\s*--\s*')
+_backslashed_double_hyphen = re.compile(r'\\\s*--\s*')
+_backslashed_plus = re.compile(r'\\\s*\+')
+_backslashed_minus = re.compile(r'\\\s*-')
+_bigl_paren = re.compile(r'\\bigl\(')
+_bigr_paren = re.compile(r'\\bigr\)')
+
+
+def _replace_cal_token(match: re.Match) -> str:
+    return 'r'
+
 
 
 def fix_greek_confusions(s: str) -> str:
     out = s
     out = _greek_r.sub('r', out)
     out = _theta_6.sub('6', out)
+    out = _arrow_to_equal.sub('=', out)
+    out = _prime_then_super.sub(lambda m: m.group(2), out)
+    out = _eta_sup_paren.sub(lambda m: f"^{{n{m.group(1)}}}", out)
+    out = _eta_sub_paren.sub(lambda m: f"_{{n{m.group(1)}}}", out)
+    out = _eta_inline_paren.sub(lambda m: f"n{m.group(1)}", out)
+    out = _cal_macro.sub(r'\\mathcal{', out)
+    out = _cal_i_token.sub(_replace_cal_token, out)
+    out = _cal_z_token.sub(_replace_cal_token, out)
+    out = _brace_wrap_r.sub(lambda m: m.group(1), out)
+    out = _backslashed_double_hyphen.sub('-', out)
+    out = _double_hyphen.sub('-', out)
+    out = _backslashed_plus.sub('+', out)
+    out = _backslashed_minus.sub('-', out)
+    out = _bigl_paren.sub('(', out)
+    out = _bigr_paren.sub(')', out)
     return out
 
 
@@ -314,7 +350,7 @@ class MainWindow(QMainWindow):
         self.cb_fix_primes.setChecked(True)
         self.cb_keep_caret_n = QCheckBox("Не трогать ^n (степени)")
         self.cb_keep_caret_n.setChecked(False)
-        self.cb_anti_confuse = QCheckBox("Анти-подмена символов (γ→r, Θ→6)")
+        self.cb_anti_confuse = QCheckBox("Анти-подмена символов (γ→r, Θ→6, η→n, →=)")
         self.cb_anti_confuse.setChecked(False)
 
                                                   
